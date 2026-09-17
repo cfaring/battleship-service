@@ -8,6 +8,12 @@ def coord_to_str(row: int, col: int) -> str:
     return f"{chr(ord('A') + row)}{col + 1}"
 
 
+def str_to_coord(coord: str) -> tuple[int, int]:
+    row = ord(coord[0]) - ord('A')
+    col = int(coord[1:]) - 1
+    return row, col
+
+
 def get_ship_cells(row, col, length, orientation):
     if orientation == 'H':
         return [(row, col + i) for i in range(length)]
