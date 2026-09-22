@@ -1,4 +1,3 @@
-import random
 import uuid
 from typing import Literal
 
@@ -8,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet import generate_valid_placement, BOARD_SIZE
+from targeting import analyze_own_shots, choose_shot
 from db import get_db
 from models import Session as SessionModel, OwnShip, Shot
 
@@ -73,14 +73,16 @@ async def make_shot(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         return {"coordinate": session.pending_shot}  # идемпотентность при retry
 
     result = await db.execute(
-        select(Shot.coordinate).where(Shot.session_id == session_id, Shot.direction == "own")
+        select(Shot.coordinate, Shot.result).where(Shot.session_id == session_id, Shot.direction == "own")
     )
-    fired = {row[0] for row in result.all()}
+    own_shots = result.all()
+    fired = {coordinate for coordinate, _ in own_shots}
     available = [c for c in ALL_COORDS if c not in fired]
     if not available:
         raise HTTPException(status_code=409, detail="No cells left to shoot")
 
-    coordinate = random.choice(available)  # заглушка
+    misses, active_hits, sunk_cells, remaining = analyze_own_shots(own_shots)
+    coordinate = choose_shot(available, misses, active_hits, sunk_cells, remaining)
     session.pending_shot = coordinate
     await db.commit()
     return {"coordinate": coordinate}
@@ -130,6 +132,8 @@ async def opponent_shot(session_id: uuid.UUID, body: OpponentShotRequest, db: As
             outcome = "hit"
 
     db.add(Shot(session_id=session_id, direction="opponent", coordinate=body.coordinate, result=outcome))
+    session.next_turn = "opponent" if outcome in ("hit", "killed") else "self"
+
     await db.commit()
     return {"result": outcome}
 
